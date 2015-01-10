@@ -61,14 +61,33 @@ public class ActiveNotifier implements FineGrainedNotifier {
         SlackNotifier.SlackJobProperty jobProperty = project.getProperty(SlackNotifier.SlackJobProperty.class);
         Result result = r.getResult();
         AbstractBuild<?, ?> previousBuild = project.getLastBuild().getPreviousBuild();
+
+        StringBuffer message = new StringBuffer();
+        String color = "";
+
         Result previousResult = (previousBuild != null) ? previousBuild.getResult() : Result.SUCCESS;
-        if ((result == Result.ABORTED && jobProperty.getNotifyAborted())
+        /*if ((result == Result.ABORTED && jobProperty.getNotifyAborted())
                 || (result == Result.FAILURE && jobProperty.getNotifyFailure())
                 || (result == Result.NOT_BUILT && jobProperty.getNotifyNotBuilt())
                 || (result == Result.SUCCESS && previousResult == Result.FAILURE && jobProperty.getNotifyBackToNormal())
                 || (result == Result.SUCCESS && jobProperty.getNotifySuccess())
                 || (result == Result.UNSTABLE && jobProperty.getNotifyUnstable())) {
             getSlack(r).publish(getBuildStatusMessage(r), getBuildColor(r));
+        }*/
+        if ((result == Result.ABORTED && jobProperty.getNotifyAborted())
+                || (result == Result.FAILURE && jobProperty.getNotifyFailure())
+                || (result == Result.NOT_BUILT && jobProperty.getNotifyNotBuilt())
+                || (result == Result.SUCCESS && previousResult == Result.FAILURE && jobProperty.getNotifyBackToNormal())
+                || (result == Result.SUCCESS && jobProperty.getNotifySuccess())
+                || (result == Result.UNSTABLE && jobProperty.getNotifyUnstable())) {
+            message.append(getBuildStatusMessage(r));
+            color = getBuildColor(r);
+        }
+        if (result == Result.SUCCESS && jobProperty.getNotifySuccess()) {
+            message.append("\n").append(getCommitList(r));
+        }
+        if (message != null) {
+            getSlack(r).publish(message.toString(),color);
         }
     }
 
@@ -95,12 +114,52 @@ public class ActiveNotifier implements FineGrainedNotifier {
             authors.add(entry.getAuthor().getDisplayName());
         }
         MessageBuilder message = new MessageBuilder(notifier, r);
+        /*message.append("Started by changes:");
+        for (Entry entry : entries) {
+            final String commitMsg = entry.getMsg().length() > 45
+                    ? entry.getMsg().substring(0, 45) + "..."
+                    : entry.getMsg();
+            final Integer fileCount = entry.getAffectedFiles().size();
+            message.append("<br>&nbsp;&nbsp;" + commitMsg
+                    + " [" + entry.getAuthor().getDisplayName()
+                    + " / " + fileCount + " file(s)"
+                    + "]");
+        }*/
         message.append("Started by changes from ");
         message.append(StringUtils.join(authors, ", "));
         message.append(" (");
         message.append(files.size());
         message.append(" file(s) changed)");
         return message.appendOpenLink().toString();
+    }
+
+    String getCommitList(AbstractBuild r) {
+        if (!r.hasChangeSetComputed()) {
+            logger.info("No commits.");
+            return "No Changes.";
+        }
+        ChangeLogSet changeSet = r.getChangeSet();
+        List<Entry> entries = new LinkedList<Entry>();
+        for (Object o : changeSet.getItems()) {
+            Entry entry = (Entry) o;
+            logger.info("Entry " + o);
+            entries.add(entry);
+        }
+        if (entries.isEmpty()) {
+            logger.info("Empty change...");
+            return "No Changes.";
+        }
+        Set<String> commits = new HashSet<String>();
+        for (Entry entry : entries) {
+            StringBuffer commit = new StringBuffer();
+            commit.append(entry.getMsg());
+            commit.append(" [").append(entry.getAuthor().getDisplayName()).append("]");
+            commits.add(commit.toString());
+        }
+        MessageBuilder message = new MessageBuilder(notifier, r);
+        message.append("Changes:\n- ");
+        message.append(StringUtils.join(commits, "\n- "));
+        return message.toString();
     }
 
     static String getBuildColor(AbstractBuild r) {
@@ -174,7 +233,10 @@ public class ActiveNotifier implements FineGrainedNotifier {
 
         public MessageBuilder appendOpenLink() {
             String url = notifier.getBuildServerUrl() + build.getUrl();
+            String consoleUrl = notifier.getBuildServerUrl() + build.getUrl() + "console";
             message.append(" (<").append(url).append("|Open>)");
+            message.append(" (<").append(consoleUrl).append("|Console>)");
+            //message.append(" (").append(url).append(")");
             return this;
         }
 
